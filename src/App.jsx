@@ -883,7 +883,7 @@ function Contact() {
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState("idle");
   const submitting = useRef(false);
-  const contactEndpoint = import.meta.env.VITE_CONTACT_FORM_ENDPOINT;
+  const web3FormsAccessKey = import.meta.env.VITE_WEB3FORMS_ACCESS_KEY;
   const update = (e) => {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
     setErrors((er) => ({ ...er, [e.target.name]: "" }));
@@ -903,7 +903,7 @@ function Contact() {
       setErrors(er);
       return;
     }
-    if (!contactEndpoint) {
+    if (!web3FormsAccessKey) {
       setStatus("unconfigured");
       return;
     }
@@ -912,16 +912,27 @@ function Contact() {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetch(contactEndpoint, {
+      const response = await fetch("https://api.web3forms.com/submit", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          access_key: web3FormsAccessKey,
+          name: form.name.trim(),
+          email: form.email.trim(),
+          subject: `New project enquiry: ${form.selection}`,
+          message: form.description.trim(),
+          selection: form.selection,
+          budget: form.budget || "Not specified",
+          deadline: form.deadline || "Not specified",
+        }),
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error("Contact endpoint returned an error.");
+      const result = await response.json();
+      if (!response.ok || result.success !== true)
+        throw new Error(result.message || "Web3Forms rejected the enquiry.");
       setStatus("success");
     } catch {
       setStatus("error");
