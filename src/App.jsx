@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -9,7 +9,13 @@ import {
   useLocation,
   useParams,
 } from "react-router-dom";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  useScroll,
+  useSpring,
+} from "framer-motion";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -217,6 +223,12 @@ function HeroVisual() {
       transition={{ duration: 0.8, delay: 0.25 }}
     >
       <div className="visual-shape" />
+      <motion.div
+        className="hero-grid-accent"
+        aria-hidden="true"
+        animate={reduce ? {} : { y: [0, -5, 0], opacity: [0.55, 0.8, 0.55] }}
+        transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
+      />
       <motion.div
         className="hero-window"
         animate={reduce ? {} : { y: [0, -8, 0] }}
@@ -530,6 +542,8 @@ function ProjectCard({ project, preview = false, index = 0 }) {
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.15 }}
       transition={{ duration: 0.45, delay: index * 0.07 }}
+      whileHover={{ y: -7, transition: { duration: 0.22 } }}
+      whileTap={{ scale: 0.99 }}
     >
       <ProjectPreview project={project} />
       <div className="project-card-body">
@@ -659,16 +673,18 @@ function ProjectDetail() {
           <motion.div className="detail-copy" {...reveal}>
             <span className="section-label">PROPOSED SOLUTION</span>
             <h2>{project.solution}</h2>
-            <div className="detail-blocks">
-              <article>
-                <span>Problem</span>
-                <p>{project.problem}</p>
-              </article>
-              <article>
-                <span>Intended audience</span>
-                <p>{project.audience}</p>
-              </article>
-            </div>
+            {!project.fromCatalogue && (
+              <div className="detail-blocks">
+                <article>
+                  <span>Problem</span>
+                  <p>{project.problem}</p>
+                </article>
+                <article>
+                  <span>Intended audience</span>
+                  <p>{project.audience}</p>
+                </article>
+              </div>
+            )}
             <Link
               className="button button--primary"
               to="/contact"
@@ -684,7 +700,11 @@ function ProjectDetail() {
           <div className="section-head">
             <div>
               <span className="section-label">APPLICATION OVERVIEW</span>
-              <h2>Key features and possibilities.</h2>
+              <h2>
+                {project.fromCatalogue
+                  ? "Scope described in the catalogue."
+                  : "Key features and possibilities."}
+              </h2>
             </div>
           </div>
           <div className="feature-grid">
@@ -741,6 +761,8 @@ function Services() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, amount: 0.15 }}
               transition={{ duration: 0.45, delay: i * 0.08 }}
+              whileHover={{ y: -7, transition: { duration: 0.22 } }}
+              whileTap={{ scale: 0.99 }}
             >
               <div className="service-card-icon">
                 <ArrowRight />
@@ -860,13 +882,16 @@ function Contact() {
   });
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState("idle");
+  const submitting = useRef(false);
+  const contactEndpoint = import.meta.env.VITE_CONTACT_FORM_ENDPOINT;
   const update = (e) => {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
     setErrors((er) => ({ ...er, [e.target.name]: "" }));
+    setStatus((current) => current === "loading" ? current : "idle");
   };
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    if (status === "loading") return;
+    if (submitting.current || status === "loading") return;
     const er = {};
     if (!form.name.trim()) er.name = "Please enter your name.";
     if (!/^\S+@\S+\.\S+$/.test(form.email))
@@ -878,10 +903,32 @@ function Contact() {
       setErrors(er);
       return;
     }
+    if (!contactEndpoint) {
+      setStatus("unconfigured");
+      return;
+    }
+    submitting.current = true;
     setStatus("loading");
-    setTimeout(() => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(contactEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(form),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("Contact endpoint returned an error.");
+      setStatus("success");
+    } catch {
       setStatus("error");
-    }, 700);
+    } finally {
+      window.clearTimeout(timeout);
+      submitting.current = false;
+    }
   };
   return (
     <>
@@ -937,6 +984,9 @@ function Contact() {
                   value={form.name}
                   onChange={update}
                   placeholder="Your name"
+                  autoComplete="name"
+                  required
+                  aria-invalid={Boolean(errors.name)}
                 />
                 {errors.name && <small>{errors.name}</small>}
               </label>
@@ -948,6 +998,9 @@ function Contact() {
                   value={form.email}
                   onChange={update}
                   placeholder="you@example.com"
+                  autoComplete="email"
+                  required
+                  aria-invalid={Boolean(errors.email)}
                 />
                 {errors.email && <small>{errors.email}</small>}
               </label>
@@ -959,6 +1012,8 @@ function Contact() {
                   name="selection"
                   value={form.selection}
                   onChange={update}
+                  required
+                  aria-invalid={Boolean(errors.selection)}
                 >
                   <option value="">Choose an option</option>
                   <optgroup label="Projects">
@@ -983,6 +1038,8 @@ function Contact() {
                 value={form.description}
                 onChange={update}
                 placeholder="What are you planning to build or improve?"
+                required
+                aria-invalid={Boolean(errors.description)}
               />{" "}
               {errors.description && <small>{errors.description}</small>}
             </label>
@@ -1011,12 +1068,27 @@ function Contact() {
                 />
               </label>
             </div>
-            {status === "error" && (
+            {status === "unconfigured" && (
               <div className="form-error" role="alert">
-                The enquiry service is not configured yet. Your submission was
-                not sent.
+                The enquiry form is not set up yet. Please contact us on Instagram
+                for now.
               </div>
             )}
+            {status === "error" && (
+              <div className="form-error" role="alert">
+                We could not send your enquiry. Please try again or contact us on
+                Instagram.
+              </div>
+            )}
+            {status === "success" && (
+              <div className="form-success" role="status">
+                Thanks. Your enquiry has been sent successfully.
+              </div>
+            )}
+            <p className="form-privacy">
+              Your details will be sent to our enquiry service so we can respond
+              to your request.
+            </p>
             <button
               className="button button--primary submit-btn"
               disabled={status === "loading"}
@@ -1056,8 +1128,36 @@ function ScrollTop() {
 }
 function RoutedSite() {
   const location = useLocation();
+  const { scrollYProgress } = useScroll();
+  const progress = useSpring(scrollYProgress, { stiffness: 110, damping: 28, mass: 0.2 });
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let observer;
+    const timer = window.setTimeout(() => {
+      const items = document.querySelectorAll(
+        "main p, footer p, main .project-card, main .service-card, main .service-preview-grid article, main .process-card, main .feature-grid article, main .value-grid article, main .detail-blocks article, main .section-head",
+      );
+      observer = new IntersectionObserver(
+        (entries) => entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          entry.target.dataset.scrollVisible = "true";
+          observer.unobserve(entry.target);
+        }),
+        { threshold: 0.12, rootMargin: "0px 0px -32px 0px" },
+      );
+      items.forEach((item, index) => {
+        item.style.setProperty("--scroll-delay", `${Math.min(index % 5, 4) * 65}ms`);
+        observer.observe(item);
+      });
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      observer?.disconnect();
+    };
+  }, [location.key]);
   return (
     <>
+      <motion.div className="scroll-progress" style={{ scaleX: progress }} aria-hidden="true" />
       <ScrollTop />
       <Navbar />
       <main>
